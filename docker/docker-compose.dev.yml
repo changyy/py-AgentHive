@@ -1,0 +1,62 @@
+x-environment: &common-env
+  POSTGRES_USER: dev_agenthive
+  POSTGRES_PASSWORD: dev_agenthive_password
+  POSTGRES_DB: dev_agenthive_db
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  DATABASE_URL: postgresql+asyncpg://dev_agenthive:dev_agenthive_password@postgres:5432/dev_agenthive_db
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_URL: redis://redis:6379/0
+
+services:
+  # Core storage services
+  postgres:
+    extends:
+      file: ./docker-compose.base.yml
+      service: postgres
+    environment:
+      <<: *common-env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    networks:
+      - agenthive_network
+
+  redis:
+    extends:
+      file: ./docker-compose.base.yml
+      service: redis
+    environment:
+      <<: *common-env
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - agenthive_network
+
+  # Coordinator service
+  coordinator:
+    extends:
+      file: ./docker-compose.base.yml
+      service: coordinator
+    environment:
+      <<: *common-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - agenthive_network
+
+networks:
+  agenthive_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: dev_agenthive_postgres_data
+  redis_data:
+    name: dev_agenthive_redis_data
