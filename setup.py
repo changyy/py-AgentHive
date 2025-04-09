@@ -63,6 +63,7 @@ setup(
         "Documentation": "https://py-agenthiveflow.readthedocs.io",
         "Source Code": "https://github.com/changyy/py-AgentHive",
     },
+    # https://pypi.org/classifiers/
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -71,7 +72,7 @@ setup(
         "Programming Language :: Python :: 3.12",
         "Operating System :: OS Independent",
         "Topic :: Software Development :: Libraries :: Application Frameworks",
-        "Topic :: Artificial Intelligence :: Agent Systems",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
     ],
     package_dir={"": "src"},
