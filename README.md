@@ -1,5 +1,7 @@
 # AgentHive
 
+![PyPI](https://img.shields.io/pypi/v/AgentHive.svg)
+
 AgentHive is a Python-based framework for managing distributed task execution with a focus on scalability and ease of use. It coordinates **producers (tasks)** and **consumers (workers)** in a high-availability setup, using Redis for messaging and PostgreSQL for persistent storage. With a powerful CLI, Docker Compose integration, and a web-based monitor, AgentHive is ideal for developers building extensible task-processing systems.
 
 ## Key Features
