@@ -204,12 +204,9 @@ async def get_dashboard_data(db = Depends(get_db_adapter)):
                     
                     if "tasks" in overview_data:
                         tasks_data = overview_data["tasks"]
-                        for key in ["pending", "assigned", "completed", "failed"]:
+                        for key in ["pending", "assigned", "completed", "failed", "total", "details",]:
                             if key in tasks_data:
                                 dashboard_data["tasks"][key] = tasks_data[key]
-                        dashboard_data["tasks"]["total"] = sum(
-                            [tasks_data.get(key, 0) for key in ["pending", "assigned", "completed", "failed"]]
-                        )
                     
                     if "resource_usage" in overview_data:
                         resource_data = overview_data["resource_usage"]
@@ -238,25 +235,6 @@ async def get_dashboard_data(db = Depends(get_db_adapter)):
                         dashboard_data["workers"]["active"] = dashboard_data["workers"]["total"]
                 except (httpx.RequestError, asyncio.TimeoutError):
                     logger.warning("Could not connect to coordinator for workers data")
-            
-            # If we still need task data
-            if dashboard_data["tasks"]["total"] == 0:
-                try:
-                    # Try to get task counts from individual status endpoints
-                    for status in ["pending", "assigned", "completed", "failed"]:
-                        response = await client.get(
-                            f"{coordinator_url}/api/tasks?status={status}&limit=1", 
-                            timeout=1.0
-                        )
-                        if response.status_code == 200:
-                            data = response.json()
-                            dashboard_data["tasks"][status] = data.get("count", 0)
-                    
-                    dashboard_data["tasks"]["total"] = sum([
-                        dashboard_data["tasks"][key] for key in ["pending", "assigned", "completed", "failed"]
-                    ])
-                except (httpx.RequestError, asyncio.TimeoutError):
-                    logger.warning("Could not connect to coordinator for task data")
         
         # If we couldn't get data from coordinator, try the database if available
         if db and dashboard_data["workers"]["total"] == 0:
@@ -296,177 +274,68 @@ async def get_dashboard_data(db = Depends(get_db_adapter)):
             "resources": {}
         }
 
-@app.get("/api/workers/summary")
-async def get_workers_summary(db = Depends(get_db_adapter)):
-    """
-    Get a summarized view of workers with just the essential information needed
-    for the workers list view.
-    """
-    try:
-        workers_data = []
-        
-        # Try to get from database first
-        if db:
-            try:
-                workers = await db.get_active_workers()
-                workers_data = [
-                    {
-                        "worker_id": w.get("worker_id"),
-                        "status": w.get("status", "unknown"),
-                        "tasks_processed": w.get("stats", {}).get("tasks_processed", 0),
-                        "current_task": w.get("stats", {}).get("current_task_id"),
-                        "last_heartbeat": w.get("last_seen") or w.get("timestamp"),
-                        "capabilities": w.get("capabilities", [])
-                    }
-                    for w in workers
-                ]
-            except Exception as e:
-                logger.error(f"Error getting workers from database: {e}")
-        
-        # If no data from DB, try coordinator
-        if not workers_data:
-            coordinator_url = get_coordinator_url()
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{coordinator_url}/api/workers")
-                if response.status_code == 200:
-                    full_data = response.json()
-                    workers_data = [
-                        {
-                            "worker_id": w.get("worker_id"),
-                            "status": w.get("status", "unknown"),
-                            "tasks_processed": w.get("stats", {}).get("tasks_processed", 0),
-                            "current_task": w.get("stats", {}).get("current_task_id"),
-                            "last_heartbeat": w.get("last_seen") or w.get("timestamp"),
-                            "capabilities": w.get("capabilities", [])
-                        }
-                        for w in full_data.get("workers", [])
-                    ]
-        
-        return {
-            "workers": workers_data,
-            "count": len(workers_data),
-            "timestamp": time.time()
-        }
-    
-    except Exception as e:
-        logger.error(f"Error getting workers summary: {e}")
-        return {"workers": [], "count": 0, "error": str(e)}
-
-@app.get("/api/tasks/summary")
-async def get_tasks_summary(
-    status: Optional[str] = Query(None, description="Filter by task status"),
-    limit: int = Query(50, description="Maximum number of tasks to return")
+@app.get("/api/worker/summary")
+async def get_worker_summary(
+    worker_id: Optional[str] = Query(None, description="Query worker status"),
 ):
-    """
-    Get a summarized view of tasks with just the essential information needed
-    for the tasks list view.
-    """
+    output = { "status": False, "error": None, "worker_id": worker_id, "data": {} }
     try:
         coordinator_url = get_coordinator_url()
-        url = f"{coordinator_url}/api/tasks"
+        url = f"{coordinator_url}/api/workers/status"
         params = {}
         
-        if status:
-            params["status"] = status
-        
-        params["limit"] = limit
+        if worker_id:
+            params["worker_ids"] = worker_id
         
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params)
             if response.status_code == 200:
                 full_data = response.json()
-                tasks_data = [
-                    {
-                        "task_id": task.get("task_id"),
-                        "task_type": task.get("task_type", "unknown"),
-                        "status": task.get("status", "unknown"),
-                        "created_at": task.get("created_at"),
-                        "assigned_to": task.get("assigned_to"),
-                        "priority": task.get("priority", 0)
-                    }
-                    for task in full_data.get("tasks", [])
-                ]
-                
-                return {
-                    "tasks": tasks_data,
-                    "count": len(tasks_data),
-                    "status_filter": status,
-                    "timestamp": time.time()
-                }
+            
+                return full_data
             else:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
     
     except httpx.RequestError as e:
         logger.error(f"Error connecting to coordinator: {e}")
-        return {"tasks": [], "count": 0, "error": "Could not connect to coordinator"}
+        output["error"] = f"Error connecting to coordinator: {e}"
     
     except Exception as e:
-        logger.error(f"Error getting tasks summary: {e}")
-        return {"tasks": [], "count": 0, "error": str(e)}
+        logger.error(f"Error getting worker summary: {e}")
+        output["error"] = f"Error getting worker summary: {e}"
 
-@app.get("/api/metrics")
-async def get_consolidated_metrics():
-    """
-    Get consolidated metrics for workers, tasks, and system resources
-    in a single API call.
-    """
-    coordinator_url = get_coordinator_url()
-    
+    return output
+
+@app.get("/api/task/summary")
+async def get_task_summary(
+    task_id: Optional[str] = Query(None, description="Query task_id status"),
+):
+    output = { "status": False, "error": None, "task_id": task_id, "data": {} }
     try:
-        metrics = {
-            "timestamp": time.time(),
-            "workers": {},
-            "tasks": {},
-            "system": {},
-            "resources": {}
-        }
+        coordinator_url = get_coordinator_url()
+        url = f"{coordinator_url}/api/tasks/status"
+        params = {}
         
-        # Try to get system metrics
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{coordinator_url}/api/metrics/system", timeout=2.0)
-                if response.status_code == 200:
-                    metrics["system"] = response.json()
-                    metrics["resources"] = metrics["system"].get("coordinator", {}).get("resource_usage", {})
-        except Exception as e:
-            logger.warning(f"Could not get system metrics: {e}")
-            # Fall back to local metrics
-            try:
-                from agenthive.utils.health import get_system_metrics
-                metrics["resources"] = get_system_metrics()
-            except Exception as e2:
-                logger.error(f"Could not get local metrics: {e2}")
+        if task_id:
+            params["task_ids"] = task_id
         
-        # Try to get task metrics
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{coordinator_url}/api/metrics/tasks", timeout=2.0)
-                if response.status_code == 200:
-                    metrics["tasks"] = response.json()
-        except Exception as e:
-            logger.warning(f"Could not get task metrics: {e}")
-        
-        # Try to get worker metrics
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{coordinator_url}/api/metrics/workers", timeout=2.0)
-                if response.status_code == 200:
-                    metrics["workers"] = response.json()
-        except Exception as e:
-            logger.warning(f"Could not get worker metrics: {e}")
-        
-        return metrics
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params)
+            if response.status_code == 200:
+                full_data = response.json()
+                return full_data
+            else:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+    
+    except httpx.RequestError as e:
+        logger.error(f"Error connecting to coordinator: {e}")
+        output["error"] = f"Error connecting to coordinator: {e}"
     
     except Exception as e:
-        logger.error(f"Error getting consolidated metrics: {e}")
-        return {
-            "timestamp": time.time(),
-            "error": str(e),
-            "workers": {},
-            "tasks": {},
-            "system": {},
-            "resources": {}
-        }
+        logger.error(f"Error getting worker summary: {e}")
+        output["error"] = f"Error getting worker summary: {e}"
+
+    return output
 
 @app.post("/api/tasks/quick-create")
 async def quick_create_task(
@@ -505,7 +374,6 @@ async def quick_create_task(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Helper functions
-
 def format_uptime(seconds: float) -> str:
     """Format uptime in seconds to a human-readable string."""
     days, remainder = divmod(seconds, 86400)

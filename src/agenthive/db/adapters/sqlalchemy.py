@@ -478,5 +478,27 @@ class SQLAlchemyAdapter(BaseDBAdapter):
         except Exception as e:
             logger.error(f"Error getting tasks state count: {e}")
         return {}
+    
+    async def get_tasks(self, task_ids: List[str] = [], minutes: int = 10 ) -> Dict[str, Any]:
+        output = {"lookup": {}, "tasks": []}
+        if not self.is_connected():
+            await self.connect()
+        try:
+            async with self.async_session() as session:
+                stmt = select(TaskModel)
+                if task_ids:
+                    stmt = stmt.where(TaskModel.task_id.in_(task_ids))
+                elif minutes > 0:
+                    last_timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp() - (minutes * 60)
+                    stmt = stmt.where(TaskModel.updated_at >= datetime.datetime.fromtimestamp(last_timestamp, tz=datetime.timezone.utc))
+                stmt = stmt.order_by(TaskModel.updated_at.desc())
+                result = await session.execute(stmt)
+                for task in result.scalars().all():
+                    task_dict = self._orm_to_dict(task)
+                    output["lookup"][task_dict["task_id"]] = task_dict
+                    output["tasks"].append(task_dict)
+        except Exception as e:
+            logger.error(f"Error getting tasks: {e}")
+        return output
 
 __all__ = ['SQLAlchemyAdapter']

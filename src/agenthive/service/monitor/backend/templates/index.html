@@ -478,8 +478,6 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadInitialData() {
         await Promise.all([
             updateDashboard(),
-            //updateWorkers(),
-            updateTasks()
         ]);
     }
     
@@ -580,78 +578,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 workersTableBody.appendChild(row);
             });
 
-        } catch (error) {
-            console.error('Error updating dashboard:', error);
-        }
-    }
-    
-    /*
-    // Update workers table with summary API
-    async function updateWorkers() {
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/workers/summary`);
-            const data = await response.json();
-            
-            workersTableBody.innerHTML = '';
-            
-            data.workers.forEach(worker => {
-                const row = document.createElement('tr');
-                
-                const workerId = worker.worker_id;
-                const status = worker.status || 'unknown';
-                const tasksProcessed = worker.tasks_processed || 0;
-                const currentTask = worker.current_task || '-';
-                
-                // Calculate time since last heartbeat
-                const lastHeartbeat = worker.last_heartbeat ? new Date(worker.last_heartbeat) : null;
-                const heartbeatAgo = lastHeartbeat ? timeSince(lastHeartbeat) : 'Unknown';
-                
-                // Create status indicator
-                const statusClass = status === 'idle' ? 'status-idle' : 
-                                  status === 'busy' ? 'status-busy' : 'status-offline';
-                
-                row.innerHTML = `
-                    <td>${workerId}</td>
-                    <td><span class="status-indicator ${statusClass}"></span>${status}</td>
-                    <td>${tasksProcessed}</td>
-                    <td>${currentTask}</td>
-                    <td>${heartbeatAgo}</td>
-                    <td>
-                        <button class="btn btn-sm btn-info worker-details-btn" data-worker-id="${workerId}">Details</button>
-                    </td>
-                `;
-                
-                workersTableBody.appendChild(row);
-            });
-            
-            // Add event listeners to detail buttons
             document.querySelectorAll('.worker-details-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const workerId = e.target.getAttribute('data-worker-id');
                     showWorkerDetails(workerId);
                 });
             });
-            
-        } catch (error) {
-            console.error('Error updating workers:', error);
-        }
-    }
-    // */
-    
-    // Update tasks table with summary API
-    async function updateTasks() {
-        try {
-            const statusFilter = taskStatusFilter.value;
-            const url = statusFilter ? 
-                `${API_BASE_URL}/api/tasks/summary?status=${statusFilter}` : 
-                `${API_BASE_URL}/api/tasks/summary`;
-            
-            const response = await fetch(url);
-            const data = await response.json();
-            
+
+
+            const selectedStatus = taskStatusFilter.value;
+
+            // update tasks
             tasksTableBody.innerHTML = '';
-            
-            data.tasks.forEach(task => {
+            data.tasks?.details?.forEach(task => {
                 const row = document.createElement('tr');
                 
                 const taskId = task.task_id;
@@ -664,6 +603,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Get assigned worker
                 const assignedTo = task.assigned_to || '-';
                 
+                if (selectedStatus != '') {
+                    if (status !== selectedStatus) {
+                        return;
+                    }
+                }
+
                 // Set row color based on status
                 if (status === 'completed') {
                     row.classList.add('table-success');
@@ -686,7 +631,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 tasksTableBody.appendChild(row);
             });
-            
+
             // Add event listeners to detail buttons
             document.querySelectorAll('.task-details-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -694,17 +639,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     showTaskDetails(taskId);
                 });
             });
-            
+
         } catch (error) {
-            console.error('Error updating tasks:', error);
+            console.error('Error updating dashboard:', error);
         }
     }
     
     // Show task details in modal (original implementation)
     async function showTaskDetails(taskId) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`);
-            const task = await response.json();
+            const encodedTaskId = encodeURIComponent(taskId);
+            const response = await fetch(`${API_BASE_URL}/api/task/summary?task_id=${encodedTaskId}`);
+            const task_info = await response.json();
+
+            if (!task_info.status || !task_info.data || !task_info.data[taskId]) {
+                alert('Task not found:', taskId);
+                return;
+            }
+            const task = task_info.data[taskId];
             
             // Update modal fields
             document.getElementById('modal-task-id').textContent = task.task_id;
@@ -749,17 +701,28 @@ document.addEventListener('DOMContentLoaded', function() {
     // Show worker details in modal (original implementation)
     async function showWorkerDetails(workerId) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/workers/${workerId}`);
-            const worker = await response.json();
+            // url encode
+            const encodedWorkerId = encodeURIComponent(workerId);
+            const response = await fetch(`${API_BASE_URL}/api/worker/summary?worker_id=${encodedWorkerId}`);
+            const worker_info = await response.json();
+
+            if (!worker_info.status) 
+                return;
+            const worker = worker_info.data[workerId];
+
+            if (!worker) {
+                alert('Worker not found:', workerId);
+                return;
+            }
             
             // Update modal fields
-            document.getElementById('modal-worker-id').textContent = worker.worker_id;
+            document.getElementById('modal-worker-id').textContent = workerId;
             document.getElementById('modal-worker-status').textContent = worker.status || 'Unknown';
             document.getElementById('modal-worker-hostname').textContent = worker.stats?.hostname || 'Unknown';
             document.getElementById('modal-worker-tasks').textContent = worker.stats?.tasks_processed || '0';
             
-            const lastHeartbeat = worker.last_seen ? 
-                new Date(worker.last_seen).toLocaleString() : 'Unknown';
+            const lastHeartbeat = worker.last_heartbeat ? 
+                new Date(worker.last_heartbeat).toLocaleString() : 'Unknown';
             document.getElementById('modal-worker-heartbeat').textContent = lastHeartbeat;
             
             // Show capabilities
@@ -834,9 +797,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response.ok) {
                 const result = await response.json();
                 alert(`Time report task created successfully! Task ID: ${result.task_id}`);
-                
-                // Update tasks list
-                await updateTasks();
             } else {
                 const error = await response.json();
                 alert(`Error creating task: ${error.detail || 'Unknown error'}`);
@@ -881,9 +841,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response.ok) {
                 const result = await response.json();
                 alert(`Task created successfully! Task ID: ${result.task_id}`);
-                
-                // Update tasks list
-                await updateTasks();
             } else {
                 const error = await response.json();
                 alert(`Error creating task: ${error.detail || 'Unknown error'}`);
@@ -894,15 +851,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Handle task status filter change
-    taskStatusFilter.addEventListener('change', updateTasks);
-    
     // Handle manual refresh
     refreshBtn.addEventListener('click', async () => {
         await Promise.all([
             updateDashboard(),
-            //updateWorkers(),
-            updateTasks()
+        ]);
+    });
+
+    // Handle taskStatusFilter change
+    taskStatusFilter.addEventListener('change', async () => {
+        await Promise.all([
+            updateDashboard(),
         ]);
     });
     
@@ -945,8 +904,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set up auto-refresh
     setInterval(() => {
         updateDashboard();
-        //updateWorkers();
-        updateTasks();
     }, REFRESH_INTERVAL);
 });
     </script>

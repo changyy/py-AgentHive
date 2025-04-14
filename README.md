@@ -1,8 +1,15 @@
+<p align="center">
+  <img src="docs/images/logo.png" alt="AgentHive Logo" width="200">
+  <br />
+  <br />
+  <a href="https://pypi.org/project/AgentHive/"><img alt="Latest Release" src="https://img.shields.io/pypi/v/AgentHive.svg" /></a>
+</p>
+
 # AgentHive
 
-![PyPI](https://img.shields.io/pypi/v/AgentHive.svg)
-
 AgentHive is a Python-based framework for managing distributed task execution with a focus on scalability and ease of use. It coordinates **producers (tasks)** and **consumers (workers)** in a high-availability setup, using Redis for messaging and PostgreSQL for persistent storage. With a powerful CLI, Docker Compose integration, and a web-based monitor, AgentHive is ideal for developers building extensible task-processing systems.
+
+![AgentHive Service](docs/images/screenshot-202504142201.jpg)
 
 ## Key Features
 
@@ -97,6 +104,31 @@ my-project/
   docker-compose -f docker/docker-compose.yml up --build
   ```
 - This copies `/path/to/agenthive/src/`, `setup.py`, and `requirements/` into the project, configuring Dockerfiles to use local code instead of PyPI.
+
+### Scaling Workers
+- To increase the number of worker instances without restarting existing services, use:
+  ```bash
+  docker compose -f docker/docker-compose.yml up -d --no-recreate --scale worker=2
+  ```
+- This command will:
+  - Start additional worker instances to reach the specified total (2 in this example)
+  - Run in detached mode (`-d`)
+  - Preserve existing containers (`--no-recreate`)
+  - Only affect the worker service, leaving other services untouched
+
+- Alternatively, to scale workers while only targeting the worker service:
+  ```bash
+  docker compose -f docker/docker-compose.yml up -d --scale worker=2 worker
+  ```
+
+- For permanent scaling, you can modify the `replicas` value in the docker-compose.yml file:
+  ```yaml
+  worker:
+    # other configuration...
+    deploy:
+      mode: replicated
+      replicas: 2  # Change from 1 to desired number
+  ```
 
 ## Development Setup
 

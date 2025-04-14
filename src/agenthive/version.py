@@ -1,2 +1,2 @@
 # Version information
-__version__ = "0.20250410.0105"
+__version__ = "1.0.202504142220"

@@ -24,6 +24,8 @@ from .heartbeat.constants import (
 class InMemoryTaskManager:
     """Utility class for Redis operations related to tasks and workers."""
 
+    WORKER_INFO_JSON_ENCODED_FIELDS = ['stats', 'resource_usage', 'configured_capabilities', 'available_capabilities', 'capabilities']
+
     def __init__(self, redis_url: str):
         self._redis_client = None
         try:
@@ -416,6 +418,37 @@ return tasks
             return False
     """
 
+    async def get_workers_status(self, worker_ids: list) -> dict:
+        output = {"lookup": {}, "data": [], "query": worker_ids}
+        if not worker_ids:
+            return output
+        
+        pipe = self._redis_client.pipeline()
+        for worker_id in worker_ids:
+            pipe.hgetall(WORKER_HASH_KEY_FORMAT.format(worker_id=worker_id))
+
+        result = await pipe.execute()
+        for data in result:
+            if not data:
+                continue
+
+            worker_info = {k.decode('utf-8'): v.decode('utf-8') for k, v in data.items()}
+            for fields in self.WORKER_INFO_JSON_ENCODED_FIELDS:
+                if fields in worker_info:
+                    try:
+                        _value = json.loads(worker_info[fields])
+                        worker_info[fields] = _value
+                    except Exception as e:
+                        logger.error(f"Error parsing worker '{fields}' for {worker_id} at get_workers_status: {e}")
+
+            output["data"].append(worker_info)
+            if worker_info.get("worker_id", None):
+                output["lookup"][worker_info["worker_id"]] = worker_info
+
+        #logger.info(f"get_workers_status: worker_ids: {worker_ids},\n result: {result},\noutput: {output}")
+
+        return output
+
     async def get_service_metrics_per_minute(self, task_type: str = None, minutes: int = 5) -> dict:
         """
         獲取每分鐘完成的任務數量統計。
@@ -497,22 +530,10 @@ return tasks
             #logger.info(f"check key ({WORKERS_SET_KEY}) worker_list_check: {worker_list_check}")
             if worker_list_check:
                 worker_list = [worker.decode('utf-8') for worker in worker_list_check]
-                #logger.info(f"check key ({WORKERS_SET_KEY}) worker_list: {worker_list}")
-                for worker_id in worker_list:
-                    worker_info_raw = await self._redis_client.hgetall(WORKER_HASH_KEY_FORMAT.format(worker_id=worker_id))
-                    #logger.info(f"check key ({WORKER_HASH_KEY_FORMAT.format(worker_id=worker_id)}) worker_info_raw: {worker_info_raw}")
-                    if worker_info_raw:
-                        worker_info = {k.decode('utf-8'): v.decode('utf-8') for k, v in worker_info_raw.items()}
+                worker_info_query = await self.get_workers_status(worker_list)
+                output["workers"] = worker_info_query["data"]
 
-                        for fields in ['stats', 'resource_usage', 'configured_capabilities', 'available_capabilities', 'capabilities']:
-                            if fields in worker_info:
-                                try:
-                                    _value = json.loads(worker_info[fields])
-                                    worker_info[fields] = _value
-                                except Exception as e:
-                                    logger.error(f"Error parsing worker '{fields}' for {worker_id}: {e}")
-
-                        output["workers"].append(worker_info)
+                #logger.info(f"\nget_service_metrics_per_minute: workers: {worker_list_check},\n output: { len(output["workers"]) }\n")
 
             output["status"] = True
         except Exception as e:

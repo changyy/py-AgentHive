@@ -402,58 +402,6 @@ class Coordinator:
         
         return task_id
     
-    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        """
-        Get the status of a task.
-        
-        Args:
-            task_id: ID of the task to check
-            
-        Returns:
-            Dict[str, Any]: Task status information
-        """
-        # Try to get from Redis first
-        if self._redis_client:
-            task_data = await self._redis_client.hgetall(f"task:{task_id}")
-            if task_data:
-                return {k.decode('utf-8'): self._try_decode_json(v) 
-                        if isinstance(v, bytes) else v 
-                        for k, v in task_data.items()}
-        
-        # Try to get from database if available
-        if self._db_adapter and hasattr(self._db_adapter, 'get_task'):
-            try:
-                task_data = await self._db_adapter.get_task(task_id)
-                if task_data:
-                    # Sync to Redis if we found it in the database but not in Redis
-                    if self._redis_client:
-                        # Convert to string format for Redis hset
-                        redis_data = {}
-                        for k, v in task_data.items():
-                            if isinstance(v, (dict, list)):
-                                redis_data[k] = json.dumps(v)
-                            elif v is None:
-                                redis_data[k] = ""
-                            else:
-                                redis_data[k] = str(v)
-                        
-                        await self._redis_client.hset(f"task:{task_id}", mapping=redis_data)
-                        
-                        # Add to appropriate set based on status
-                        status = task_data.get("status", "pending")
-                        if status == "completed" and "completed_at" in task_data:
-                            await self._redis_client.zadd("tasks:completed", {task_id: task_data["completed_at"]})
-                        elif status == "failed" and "failed_at" in task_data:
-                            await self._redis_client.zadd("tasks:failed", {task_id: task_data["failed_at"]})
-                        elif status == "pending":
-                            await self._redis_client.zadd("tasks:pending", {task_id: task_data.get("priority", 0)})
-                        
-                    return task_data
-            except Exception as e:
-                logger.error(f"Error getting task status from database: {e}")
-        
-        return {"status": "unknown", "error": "Task not found"}
-    
     def _try_decode_json(self, value):
         """Helper method to try decoding JSON values."""
         if isinstance(value, bytes):
@@ -933,6 +881,7 @@ class Coordinator:
                 "avg_completion_time": 0,
                 "avg_waiting_time": 0,
                 "throughput": 0,
+                "details": []
             },
             "error": None,
         }
@@ -974,11 +923,57 @@ class Coordinator:
                 except Exception as e:
                     logger.error(f"Error updating task status in database: {e}")
 
+                # load tasks from database
+                try:
+                    if hasattr(self._db_adapter, 'get_tasks'):
+                        query_tasks = await self._db_adapter.get_tasks(minutes=60)
+                        if query_tasks:
+                            output["tasks"]["details"] = query_tasks["tasks"]
+                except Exception as e:
+                    logger.error(f"Error query task status in database: {e}")
+
             output["tasks"]["total"] = output["tasks"]["pending"] + output["tasks"]["assigned"] + output["tasks"]["completed"] + output["tasks"]["failed"]
 
         except Exception as e:
             logger.error(f"Error getting service metrics: {e}")
             output["error"] = str(e)
+        return output
+    
+    async def get_tasks_status(self, task_ids: List[str]) -> Dict[str, Any]:
+        output = {"status": False, "tasks": {}, "error": None }
+
+        if self._db_adapter:
+            try:
+                if hasattr(self._db_adapter, 'get_tasks'):
+                    query_tasks = await self._db_adapter.get_tasks(task_ids=task_ids)
+                    if query_tasks:
+                        output["status"] = True
+                        output["tasks"] = query_tasks["lookup"]
+                    else:
+                        output["status"] = False
+                        output["error"] = "Failed to get tasks status from database"
+            except Exception as e:
+                logger.error(f"Error query task status in database: {e}")
+                output["error"] = f"Error query task status in database: {e}"
+        else:
+            output["error"] = "Database adapter not available"
+            logger.error("Database adapter not available")
+
+        return output
+        
+    async def get_workers_status(self, worker_ids: List[str]) -> Dict[str, Any]:
+        output = {"status": False, "workers": {}, "error": None }
+
+        # Get worker status from Redis
+        if self._in_memory_task_manager:
+            worker_status = await self._in_memory_task_manager.get_workers_status(worker_ids)
+            if worker_status:
+                output["workers"] = worker_status["lookup"]
+                output["status"] = True
+            else:
+                output["error"] = "Failed to get workers status from in-memory task manager"
+                logger.error(f"Failed to get workers status from in-memory task manager: {worker_status}")
+
         return output
     
     async def get_active_workers(self) -> List[Dict[str, Any]]:

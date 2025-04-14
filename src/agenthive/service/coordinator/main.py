@@ -395,6 +395,90 @@ async def get_workers(
     workers = await coordinator.get_active_workers()
     return {"workers": workers, "count": len(workers)}
 
+@app.get("/api/workers/status", dependencies=[Depends(verify_api_key)])
+async def get_workers_status(
+    worker_ids: Optional[str] = Query(None, description="Query worker status"),
+    coordinator: Coordinator = Depends(get_coordinator)
+):
+    """
+    Get information about all active workers.
+    """
+    #workers = await coordinator.get_active_workers()
+    output = { "status": False, "query": [], "data": {}, "error": None }
+
+    if not worker_ids:
+        output["error"] = "No worker IDs provided"
+        return output
+
+    # check worker_id length not empty
+    query_workers_ids = [ worker_id.strip() for worker_id in worker_ids.split(",") if worker_id.strip() ]
+    if not query_workers_ids:
+        output["error"] = "No valid worker IDs provided"
+        return output
+    
+    query_workers_ids = list(set(query_workers_ids))
+    query_data = await coordinator.get_workers_status(query_workers_ids)
+    if query_data and 'status' in query_data and query_data['status']:
+        try:
+            output["data"] = query_data['workers']
+        except Exception as e:
+            logger.error(f"Error parsing worker status data: {e}")
+            output["error"] = "Error parsing worker status data"
+            return output
+    
+    output["status"] = True
+    for worker_id in query_workers_ids:
+        if worker_id not in output["data"]:
+            output["status"] = False
+            if isinstance(output["error"], list):
+                output["error"].append(f"Worker ID {worker_id} not found")
+            else:
+                output["error"] = [ f"Worker ID {worker_id} not found" ]
+
+    return output
+
+@app.get("/api/tasks/status", dependencies=[Depends(verify_api_key)])
+async def get_workers_status(
+    task_ids: Optional[str] = Query(None, description="Query worker status"),
+    coordinator: Coordinator = Depends(get_coordinator)
+):
+    """
+    Get information about all active workers.
+    """
+    #workers = await coordinator.get_active_workers()
+    output = { "status": False, "query": [], "data": {}, "error": None }
+
+    if not task_ids:
+        output["error"] = "No task IDs provided"
+        return output
+
+    # check worker_id length not empty
+    query_tasks_ids = [ task_id.strip() for task_id in task_ids.split(",") if task_id.strip() ]
+    if not query_tasks_ids:
+        output["error"] = "No valid task IDs provided"
+        return output
+    
+    query_tasks_ids = list(set(query_tasks_ids))
+    query_data = await coordinator.get_tasks_status(query_tasks_ids)
+    if query_data and 'status' in query_data and query_data['status']:
+        try:
+            output["data"] = query_data['tasks']
+        except Exception as e:
+            logger.error(f"Error parsing task status data: {e}")
+            output["error"] = "Error parsing task status data"
+            return output
+    
+    output["status"] = True
+    for task_id in query_tasks_ids:
+        if task_id not in output["data"]:
+            output["status"] = False
+            if isinstance(output["error"], list):
+                output["error"].append(f"Task ID {task_id} not found")
+            else:
+                output["error"] = [ f"Task ID {task_id} not found" ]
+
+    return output
+
 @app.post("/api/tasks/submit", dependencies=[Depends(verify_api_key)])
 async def submit_task(
     task_submission: TaskSubmission,
@@ -424,44 +508,6 @@ async def submit_task(
 
     logger.info(f"Task {task_id} submitted with type {task_submission.task_type} and priority {task_submission.priority}")
     return {"status": "submitted", "task_id": task_id}
-
-@app.get("/api/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
-async def get_task_status(
-    task_id: str,
-    coordinator: Coordinator = Depends(get_coordinator)
-):
-    """
-    Get the status of a task.
-    """
-    status = await coordinator.get_task_status(task_id)
-    
-    if status.get("status") == "unknown":
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    return status
-
-@app.get("/api/tasks/{task_id}/result", dependencies=[Depends(verify_api_key)])
-async def get_task_result(
-    task_id: str,
-    coordinator: Coordinator = Depends(get_coordinator)
-):
-    """
-    Get the result of a completed task.
-    """
-    status = await coordinator.get_task_status(task_id)
-    
-    if status.get("status") == "unknown":
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    if status.get("status") != "completed":
-        raise HTTPException(status_code=400, detail=f"Task {task_id} is not completed")
-    
-    result = await coordinator.get_task_result(task_id)
-    
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Result for task {task_id} not found")
-    
-    return {"task_id": task_id, "result": result}
 
 @app.post("/api/tasks/{task_id}/complete", dependencies=[Depends(verify_api_key)])
 async def report_task_complete(
@@ -527,60 +573,6 @@ async def get_next_task(
     
     return {"status": "task_available", "task": task, "worker_id": worker_id}
 
-@app.get("/api/tasks", dependencies=[Depends(verify_api_key)])
-async def get_tasks(
-    status: Optional[str] = Query(None, description="Filter by task status"),
-    task_type: Optional[str] = Query(None, description="Filter by task type"),
-    limit: int = Query(100, description="Maximum number of tasks to return"),
-    enhanced_coordinator: EnhancedCoordinator = Depends(get_enhanced_coordinator)
-):
-    """
-    Get tasks with optional filtering.
-    """
-    tasks = await enhanced_coordinator.get_tasks(
-        status=status,
-        task_type=task_type,
-        limit=limit
-    )
-    
-    return {
-        "tasks": tasks,
-        "count": len(tasks),
-        "status_filter": status,
-        "type_filter": task_type
-    }
-
-@app.get("/api/metrics/tasks", dependencies=[Depends(verify_api_key)])
-async def get_task_metrics(
-    coordinator: Coordinator = Depends(get_coordinator)
-):
-    """
-    Get metrics about tasks in the system.
-    """
-    metrics = await coordinator.get_task_metrics()
-    return metrics
-
-@app.get("/api/supported_task_types")
-async def get_supported_task_types():
-    """
-    Get all supported task types from active workers.
-    """
-    # First check in-memory cache
-    in_memory_types = list(app_state.supported_task_types)
-    
-    # If empty, try to get from Redis
-    if not in_memory_types and app_state.coordinator and app_state.coordinator._redis_client:
-        try:
-            redis_types = await app_state.coordinator._redis_client.smembers("supported_task_types")
-            in_memory_types = [t.decode('utf-8') if isinstance(t, bytes) else t for t in redis_types]
-            
-            # Update in-memory cache
-            app_state.supported_task_types.update(in_memory_types)
-        except Exception as e:
-            logger.error(f"Error getting supported task types from Redis: {e}")
- 
-    return {"task_types": in_memory_types}
-
 # Exception handler for validation errors
 @app.exception_handler(ValidationError)
 async def validation_exception_handler(request: Request, exc: ValidationError):
@@ -591,36 +583,6 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
         status_code=400,
         content={"detail": exc.errors()},
     )
-
-@app.get("/api/metrics/workers", dependencies=[Depends(verify_api_key)])
-async def get_worker_metrics(
-    coordinator: Coordinator = Depends(get_coordinator)
-):
-    """
-    Get metrics about workers in the system.
-    """
-    metrics = await coordinator.get_worker_metrics()
-    return metrics
-
-@app.get("/api/metrics/system", dependencies=[Depends(verify_api_key)])
-async def get_system_metrics_api():
-    """
-    Get metrics about the system.
-    """
-    metrics = get_system_metrics()
-    
-    # Add coordinator-specific metrics
-    if app_state.coordinator:
-        metrics["coordinator"] = {
-            "start_time": app_state.coordinator._start_time if hasattr(app_state.coordinator, "_start_time") else time.time(),
-            "task_registry_size": len(app_state.coordinator._task_registry) if hasattr(app_state.coordinator, "_task_registry") else 0,
-            "worker_registry_size": len(app_state.coordinator._worker_registry) if hasattr(app_state.coordinator, "_worker_registry") else 0,
-            "task_queue_size": len(app_state.coordinator._task_queue) if hasattr(app_state.coordinator, "_task_queue") else 0,
-            "task_results_size": len(app_state.coordinator._task_results) if hasattr(app_state.coordinator, "_task_results") else 0,
-            "supported_task_types": list(app_state.supported_task_types)
-        }
-    
-    return metrics
 
 @app.get("/api/metrics/overview", dependencies=[Depends(verify_api_key)])
 async def get_overview_metrics_api():
@@ -645,35 +607,6 @@ async def load_tasks():
     if app_state.coordinator and app_state.coordinator._db_adapter:
         tasks = await app_state.coordinator._load_tasks_from_database()
         return {"load": tasks}
-
-def hypercornMain():
-    """
-    Main function - use Hypercorn to run the FastAPI application
-    """
-    import asyncio
-    from hypercorn.asyncio import serve
-    from hypercorn.config import Config
-    import sys
-   
-    # Get host and port
-    host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "8000"))
-    
-    logger.info(f"Starting Coordinator API service, listening on {host}:{port}")
-    
-    # Configure Hypercorn
-    config = Config()
-    config.bind = [f"{host}:{port}"]
-    config.use_reloader = os.environ.get("DEBUG", "false").lower() == "true"
-    config.accesslog = "-"  # Output access logs to stdout
-    config.errorlog = "-"   # Output error logs to stdout
-    config.loglevel = "info"
-    
-    try:
-        # Run server
-        asyncio.run(serve(app, config))
-    except KeyboardInterrupt:
-        logger.info("Server stopped")
 
 def main():
     """
