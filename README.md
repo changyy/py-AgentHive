@@ -1,9 +1,13 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/changyy/py-AgentHive/main/docs/images/logo.png" alt="AgentHive Logo" width="200">
+  <br />
+  <br />
+</p>
+
 # AgentHive
 
 [![PyPI version](https://img.shields.io/pypi/v/AgentHive.svg)](https://pypi.org/project/AgentHive)
 [![PyPI Downloads](https://static.pepy.tech/badge/AgentHive)](https://pepy.tech/projects/AgentHive)
-
-[![Project Logo](https://raw.githubusercontent.com/changyy/py-AgentHive/main/docs/images/logo.png)](https://pypi.org/project/AgentHive)
 
 AgentHive is a Python-based framework for managing distributed task execution with a focus on scalability and ease of use. It coordinates **producers (tasks)** and **consumers (workers)** in a high-availability setup, using Redis for messaging and PostgreSQL for persistent storage. With a powerful CLI, Docker Compose integration, and a web-based monitor, AgentHive is ideal for developers building extensible task-processing systems.
 
